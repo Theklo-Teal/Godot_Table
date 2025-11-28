@@ -1,5 +1,5 @@
 
-![video demonstration(docs/table.mp4)
+![video demonstration](docs/table.mp4)
 
 For Paracortical Initiative, 2025, Diogo "Theklo" Duarte
 
