@@ -18,8 +18,8 @@ This isn't technically a Godot Plugin, it doesn't use the special Plugin feature
 After that, the «class_name Table» registers the node so you can add it to a project like you add any Godot node.
 
 # USAGE
-Firstly you have to set the «columns» array variable with titles of each desire column. Then you can use `add_row()` or `add_dict_row()` to add data to the table. You may also identify each row with an arbitrary unique id using `set_row_id()`.
-When sorting the rows, it searches `Variant` values in for comparison in the cells' metadata. Use `set_cell_meta()` to define those values, otherwise it defaults to using the text of the cells.
+Firstly you have to set the «columns» array variable with titles of each desired column. Then you can use `add_row()` or `add_dict_row()` to add data to the table. You may also identify each row with an arbitrary unique id using `set_row_id()`.
+When sorting the rows, it searches `Variant` values for comparison in the cells' metadata. Use `set_cell_meta()` to define those values, otherwise it defaults to using the text of the cells.
 Multiple functions exist to get details about rows or cells, even metadata specific to the rows. Call `get_selected_rows()` to get the rows which are selected.
 
 
