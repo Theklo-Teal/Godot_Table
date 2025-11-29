@@ -68,8 +68,8 @@ func _init() -> void:
 	_columns = scene.get_node("%Columns")
 	
 	scene.get_node("ScrollHeader").get_h_scroll_bar().share(scene.get_node("ScrollLanding").get_h_scroll_bar())
-
-func _ready() -> void:
+	
+	await ready
 	_landing.draw.connect(_on_landing_draw)
 	_landing.gui_input.connect(_on_landing_gui_input)
 	_header.draw.connect(_on_header_draw)
@@ -130,9 +130,10 @@ func _on_landing_draw():
 
 var hover_cell := -Vector2i.ONE
 var selected_rows : Array[int]
-func _on_cell_mouse_enter(cell:Control):
+func _on_cell_mouse_enter(cell:Control, idx:int = -1):
+	if idx < 0:
+		idx = cell.get_index()
 	var col = cell.get_parent().get_index()
-	var idx = cell.get_index()
 	hover_cell = Vector2i(col, idx)
 	_landing.queue_redraw()
 
@@ -219,8 +220,7 @@ func add_row(data:Array[String]) -> int:
 		id = _rows_ids.keys().max() + 1
 	for col in range(data.size()):
 		var cell = _add_cell_text(col, idx, data[col])
-		var title = _title_col[col]
-		cell.mouse_entered.connect(_on_cell_mouse_enter.bind(title, id))
+		cell.mouse_entered.connect(_on_cell_mouse_enter.bind(cell, id))
 		_rows_ids[id] = idx
 		_rows_idx[idx] = id
 	return idx
@@ -236,7 +236,7 @@ func add_dict_row(data:Dictionary) -> int:
 		
 	for title in data:
 		var cell = _add_cell_text(get_title_col(title), idx, data[title])
-		cell.mouse_entered.connect(_on_cell_mouse_enter.bind(cell))
+		cell.mouse_entered.connect(_on_cell_mouse_enter.bind(cell, idx))
 		_rows_ids[id] = idx
 		_rows_idx[idx] = id
 	_landing.queue_redraw()
