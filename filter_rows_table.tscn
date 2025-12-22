@@ -1,0 +1,90 @@
+[gd_scene load_steps=3 format=3 uid="uid://bchncgbcifmec"]
+
+[ext_resource type="Script" uid="uid://cni8wuan31a8b" path="res://module/Godot_Table/table.gd" id="1_eymjy"]
+
+[sub_resource type="GDScript" id="GDScript_glv2v"]
+script/source = "extends LineEdit
+
+@export var table : Table
+@export var found : Label
+
+func _ready() -> void:
+	text_submitted.connect(_on_text_submit)
+	
+	await table.ready
+	
+	table.add_row([\"Alice\", \"Femin.\", \"Square Enix\"])
+	table.add_row([\"Bob\", \"Mascu.\", \"Warhorse Studios\"])
+	table.add_row([\"Carol\", \"Femin.\", \"Warhorse Studios\"])
+	table.add_row([\"Daniel\", \"Enbie\", \"Arkane Studios\"])
+	table.add_row([\"Eve\", \"Enbie\", \"Square Enix\"])
+	table.add_row([\"Frank\", \"Mascu.\", \"Bungie\"])
+	table.add_row([\"Grace\", \"Femin.\", \"Arkane Studios\"])
+	table.add_row([\"Heidi\", \"Femin.\", \"Rare\"])
+	table.add_row([\"Ivan\", \"Mascu.\", \"Bungie\"])
+	table.add_row([\"Judy\", \"Femin.\", \"Crytek\"])
+	table.add_row([\"Lydia\", \"Femin.\", \"Bungie\"])
+	table.add_row([\"Mike\", \"Mascu.\", \"Arkane Studios\"])
+	table.add_row([\"Noel\", \"Enbie\", \"Crytek\"])
+	table.add_row([\"Oscar\", \"Mascu.\", \"Arkane Studios\"])
+	table.add_row([\"Pat\", \"Enbie\", \"Warhorse Studios\"])
+	
+	table._sort_by_column(\"Company\")
+	_on_text_submit(text)
+
+func _on_text_submit(new_text:String):
+	if new_text.is_empty():
+		for row in range(table.get_row_count()):
+			table.show_row(row)
+	else:
+		var row_idx : int = -1
+		for cell_text : String in table.get_column_cells_texts(table.sorting_column):
+			row_idx += 1
+			var row_id = table.get_row_id(row_idx)
+			var make_visible = cell_text.similarity(new_text) > 0.4
+			table.row_visible(row_id, make_visible)
+	found.text = \"Found: \" + str(table.get_shown_row_count())
+"
+
+[node name="Filter_Rows_Table" type="VBoxContainer"]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="Label" type="Label" parent="."]
+custom_minimum_size = Vector2(0, 100)
+layout_mode = 2
+text = "This is an example of a LineEdit being used to tell which Table rows to display.
+This only shows rows that match the filter prompt. If the prompt is empty, it shows all rows.
+Press the enter key to submit after typing a prompt. "
+vertical_alignment = 1
+autowrap_mode = 3
+
+[node name="HBoxContainer" type="HBoxContainer" parent="."]
+layout_mode = 2
+
+[node name="Label" type="Label" parent="HBoxContainer"]
+layout_mode = 2
+text = "Filter: "
+
+[node name="LineEdit" type="LineEdit" parent="HBoxContainer" node_paths=PackedStringArray("table", "found")]
+layout_mode = 2
+size_flags_horizontal = 3
+placeholder_text = "Filter Prompt"
+script = SubResource("GDScript_glv2v")
+table = NodePath("../../Table")
+found = NodePath("../Found")
+
+[node name="Found" type="Label" parent="HBoxContainer"]
+layout_mode = 2
+text = "Found: N/A"
+
+[node name="Table" type="PanelContainer" parent="."]
+layout_mode = 2
+size_flags_vertical = 3
+script = ExtResource("1_eymjy")
+columns = Array[String](["#", "Name", "Gender", "Company"])
+autofill_idx = "#"
+metadata/_custom_type_script = "uid://cni8wuan31a8b"

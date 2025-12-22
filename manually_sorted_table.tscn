@@ -1,0 +1,63 @@
+[gd_scene load_steps=3 format=3 uid="uid://dxkktyhp5q7cv"]
+
+[ext_resource type="Script" uid="uid://cboyfiu63gait" path="res://module/Godot_Table/Demos/manually_sorted_table.gd" id="1_cwk7d"]
+
+[sub_resource type="GDScript" id="GDScript_glv2v"]
+script/source = "extends CheckButton
+
+@export var table : Table
+@export var mode_label : Label
+
+func _ready() -> void:
+	await table.ready
+	_pressed()
+
+func _pressed() -> void:
+	table.mode = button_pressed
+	re_label()
+
+func re_label():
+	mode_label.text = [
+		\"Mode: Move origin to behind target (if it's before) or to front of target (if after).\",
+		\"Mode: Swap origin and target.\"
+	][int(button_pressed)]
+"
+
+[node name="Manually_Sorted_Table" type="VBoxContainer"]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="Label" type="Label" parent="."]
+custom_minimum_size = Vector2(0, 100)
+layout_mode = 2
+text = "The \"Manual\" column shows the priority of positioning when sorting by that column. The numbers change when dragging columns while sorting by that column.
+In a real application, there doesn't need to be an explicit Manual column , or it could show other things rather than the priorities.
+Two methods for manually sorting rows are available. Click the \"Mode\" button to switch them."
+autowrap_mode = 3
+
+[node name="HBoxContainer" type="HBoxContainer" parent="."]
+layout_mode = 2
+
+[node name="mode" type="CheckButton" parent="HBoxContainer" node_paths=PackedStringArray("table", "mode_label")]
+layout_mode = 2
+size_flags_horizontal = 0
+button_pressed = true
+script = SubResource("GDScript_glv2v")
+table = NodePath("../../Table")
+mode_label = NodePath("../Label")
+
+[node name="Label" type="Label" parent="HBoxContainer"]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "Mode: Swap origin and target."
+
+[node name="Table" type="PanelContainer" parent="."]
+layout_mode = 2
+size_flags_vertical = 3
+script = ExtResource("1_cwk7d")
+columns = Array[String](["#", "Manual", "Name", "Age", "Job"])
+autofill_idx = "#"
+metadata/_custom_type_script = "uid://cni8wuan31a8b"
