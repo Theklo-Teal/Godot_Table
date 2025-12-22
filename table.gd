@@ -11,7 +11,7 @@ class_name Table
 
 signal header_title_clicked(title:String)
 signal column_moved(title:String, idx:int) ## A column was dragged to a new position. Provides title of that column and that new position, the destination.
-signal cell_selected(column:String, row:int, cell:int)
+signal cell_selected(column:String, row_id:int, cell:int)
 signal cell_clicked(coord:Vector2i, button_index:MouseButton)
 signal cell_dragged(from:Vector2i, to:Vector2i) ## A cell was dragged over another. Passes the coordinates of the cells as (row_idx, col_idx).
 signal rows_selected(rows:PackedInt32Array)
@@ -22,8 +22,7 @@ signal row_dragged(from_id:int, to_id:int) ## Emitted along [code]cell_dragged[/
 #FIXME Adding columns throws an error for trying to access cells under the new column that don't exist.
 #FIXME Functions that rely on the node structure, like `get_cell_item()`, won't be reliable if called in the same process frame as when calling functions that affect the node structure, like `add_row()`. 
 
-#TODO: Implement Sticky Column
-#TODO: If rows are selected when sorting, update idx of selection to maintain the same ids selected.
+#TODO Implement Sticky Column
 #TODO Allow multiple selection of rows that aren't necessarily between a range.
 #TODO The `columns` setter probably needs refactoring. Make it preserve cell data if a column wasn't removed.
 #TODO Make sure sorting is stable between the last sorted action and the next.
@@ -164,8 +163,8 @@ func _on_landing_draw():
 		_landing.get_node("Spacer").custom_minimum_size.y = _header.size.y
 	
 	# Highlight selected rows
-	for row in selected_rows:
-		var rect = get_row_rect(row)
+	for row_id in selected_rows:
+		var rect = get_row_rect(get_row_index(row_id))
 		rect.position.y += spacer_y - 2
 		rect.size.y += 3
 		_landing.draw_rect(rect, base_color.lightened(0.4))
@@ -243,7 +242,7 @@ func _on_title_up():
 #region Cell Actions
 var _pressed_cell := Vector2i.ONE * -1
 var hover_cell := Vector2i.ONE * -1
-var selected_rows : Array[int]
+var selected_rows : Array[int]  ## IDs of rows that are selected
 
 func _on_cell_mouse_enter(cell:Control, col:String):
 	var idx = cell.get_index()
@@ -261,6 +260,8 @@ func _on_landing_gui_input(event: InputEvent) -> void:
 					for idx in get_selected_rows():
 						remove_row(idx)
 			KEY_DOWN, KEY_PAGEDOWN:
+				#TODO Make new selection skip hidden rows.
+				#TODO Make selection store row ids, rather than idx.
 				var row_count = _rows_idx.size()
 				var last_selection = selected_rows.size() - 1
 				if row_count == 0:
@@ -299,18 +300,26 @@ func _on_landing_gui_input(event: InputEvent) -> void:
 				if hover_cell == _pressed_cell: # It's a click!
 					cell_clicked.emit(hover_cell, event.button_index)
 					
-					if event.button_index == MOUSE_BUTTON_LEFT:
+					if event.button_index == MOUSE_BUTTON_LEFT:  # Range Selection
 						if Input.is_key_pressed(KEY_CTRL) and not selected_rows.is_empty():
-							var start = min(selected_rows[-1], hover_cell.y)
-							var stop = max(selected_rows[-1], hover_cell.y)
+							var start = min(get_row_index(selected_rows[-1]), hover_cell.y)
+							var stop = max(get_row_index(selected_rows[-1]), hover_cell.y)
 							var new_select : Array[int]
 							selected_rows.clear()
 							for each in range(start, stop + 1):
-								new_select.append(each)
+								var id = get_row_id(each)
+								if not id in _hidden_rows:
+									new_select.append(id)
 							selected_rows = new_select
-						else:
-							selected_rows = [hover_cell.y]
-							cell_selected.emit(_title_col[hover_cell.x], hover_cell.y, hover_cell.x)
+						elif Input.is_key_pressed(KEY_SHIFT):  # Multiple Selection
+							var id = get_row_id(hover_cell.y)
+							if id in selected_rows:
+								selected_rows.erase(id)
+							else:
+								selected_rows.append(id)
+						else:  # Single Selection
+							selected_rows = [get_row_id(hover_cell.y)]
+							cell_selected.emit(get_col_title(hover_cell.x), get_row_id(hover_cell.y), hover_cell.x)
 						rows_selected.emit(selected_rows)
 				else: # It's a drag!
 					cell_dragged.emit(_pressed_cell, hover_cell)
@@ -379,13 +388,13 @@ func hide_row(row_idx:int):
 func show_row(row_id:int):
 	row_visible(row_id, true)
 
-#TODO: deselect rows that are hidden
 ## Sets visibility on a row with the given ID. Cells of hidden columns stay hidden.
 func row_visible(row_id: int, make_visible:bool):
 	var idx = get_row_index(row_id)
 	if make_visible:
 		_hidden_rows.erase(row_id)
 	else:
+		selected_rows.erase(row_id)
 		if not row_id in _hidden_rows:
 			_hidden_rows.append(row_id)
 	var col : int = -1
@@ -760,6 +769,8 @@ func set_row_id(idx:int, id:int) -> bool:
 #endregion
 
 #region Find or Get Things
+
+# Returns IDs of selected rows.
 func get_selected_rows() -> PackedInt32Array:
 	return selected_rows as PackedInt32Array
 
@@ -939,6 +950,7 @@ func _sort_by_column(title:String):
 	_rows_ids = new_rows_ids
 	rows_sorted.emit(sorting_column)
 	_header.queue_redraw()
+	_landing.queue_redraw()
 
 
 ## Row sorting delegator function. Extend this script or write your own [code]sort_by_{column_title}[/code] functions for custom rules when sorting a table.
