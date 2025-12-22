@@ -1,0 +1,43 @@
+[gd_scene load_steps=5 format=3 uid="uid://di6t1065cnj01"]
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_o0kjx"]
+bg_color = Color(0.11858133, 0.11858142, 0.11858133, 0.9254902)
+corner_radius_top_left = 4
+corner_radius_top_right = 4
+corner_radius_bottom_right = 4
+corner_radius_bottom_left = 4
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_v76gu"]
+bg_color = Color(0.07, 0.07, 0.07, 0.9254902)
+corner_radius_top_left = 4
+corner_radius_top_right = 4
+corner_radius_bottom_right = 4
+corner_radius_bottom_left = 4
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_3brur"]
+bg_color = Color(0.12, 0.12, 0.12, 1)
+border_width_left = 3
+border_width_top = 3
+border_color = Color(0.02, 0.02, 0.02, 1)
+border_blend = true
+corner_radius_top_left = 4
+corner_radius_top_right = 4
+corner_radius_bottom_right = 4
+corner_radius_bottom_left = 4
+
+[sub_resource type="Theme" id="Theme_o0kjx"]
+Button/styles/hover = SubResource("StyleBoxFlat_o0kjx")
+Button/styles/normal = SubResource("StyleBoxFlat_v76gu")
+Button/styles/pressed = SubResource("StyleBoxFlat_3brur")
+
+[node name="Table_Header" type="ScrollContainer"]
+size_flags_vertical = 0
+mouse_filter = 0
+horizontal_scroll_mode = 3
+vertical_scroll_mode = 0
+
+[node name="Header_Box" type="HBoxContainer" parent="."]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 0
+theme = SubResource("Theme_o0kjx")

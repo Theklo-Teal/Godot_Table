@@ -1,0 +1,18 @@
+[gd_scene format=3 uid="uid://c367u82wb46vh"]
+
+[node name="Table_Landing" type="ScrollContainer"]
+
+[node name="Landing_Box" type="VBoxContainer" parent="."]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+mouse_filter = 0
+
+[node name="Spacer" type="Control" parent="Landing_Box"]
+custom_minimum_size = Vector2(0, 32)
+layout_mode = 2
+
+[node name="Columns" type="HBoxContainer" parent="Landing_Box"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_vertical = 3
