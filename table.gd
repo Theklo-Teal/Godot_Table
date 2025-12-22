@@ -1,5 +1,5 @@
 @tool
-extends Control
+extends PanelContainer
 class_name Table
 
 ## A Control node that displays a simple table where cells in the same row are grouped as the same element, so add and remove multiple cells at a time.[br]
@@ -12,10 +12,10 @@ class_name Table
 signal header_title_clicked(title:String)
 signal column_moved(title:String, idx:int) ## A column was dragged to a new position. Provides title of that column and that new position, the destination.
 signal cell_selected(column:String, row:int, cell:int)
-signal cell_clicked(button_index:MouseButton)
+signal cell_clicked(coord:Vector2i, button_index:MouseButton)
 signal cell_dragged(from:Vector2i, to:Vector2i) ## A cell was dragged over another. Passes the coordinates of the cells as (row_idx, col_idx).
 signal rows_selected(rows:PackedInt32Array)
-signal rows_sorted
+signal rows_sorted(title:String)
 signal row_dragged(from_id:int, to_id:int) ## Emitted along [code]cell_dragged[/code] if the cells are of different rows. It supplies the IDs of these rows, rather than cell idx coordinate.
 
 #FIXME Having autofill columns named to a title that doesn't exist throws errors with some functions.
@@ -35,6 +35,7 @@ var _title_col : Dictionary[int, String]  ## idx -> title
 var _rows_idx : Dictionary[int, int] ## idx -> id This is an index between a rows's index as a child of the HBox and the arbitrary ids to find them.
 var _rows_ids : Dictionary[int, int] ## id -> idx Back-reference to «_rows_idx»
 var _rows_meta : Dictionary[int, Variant] ## id -> metadata
+var _hidden_rows : Array[int]  ## Lists id of rows to be hidden.
 
 @export var show_header : bool = true :
 	set(val):
@@ -97,7 +98,7 @@ var _rows_meta : Dictionary[int, Variant] ## id -> metadata
 		_justify_content()
 		#_queue_sort()
 
-#@export var sticky_column : String = "" ## Column title for a column that always is in view even when scrolling horizontally. Not implemented.
+#@export var sticky_column : String = "" ## Column title for a column that is always in view even when scrolling horizontally. Not implemented.
 @export var autofill_idx : String = "" ## Column title of the column used for numbering rows. Empty if none.
 @export var autofill_id : String = "" ## Column title of the column that will be filled with row id. Empty if none. See `set_row_id()`.
 @export var autofill_meta : String = "" ## Column title of the column that will be filled with row metadata. Empty if none. See `set_row_meta()`.
@@ -108,15 +109,16 @@ var _header : BoxContainer
 var _landing : BoxContainer
 var _columns : BoxContainer
 func _init() -> void:
-	var scene = preload("Table.tscn").instantiate()
-	add_child(scene)
-	scene.owner = self
-	
-	_header = scene.get_node("%Header")
-	_landing = scene.get_node("%Landing")
-	_columns = scene.get_node("%Columns")
-	
-	scene.get_node("ScrollHeader").get_h_scroll_bar().share(scene.get_node("ScrollLanding").get_h_scroll_bar())
+	var header_parent : ScrollContainer = preload("table_header.tscn").instantiate()
+	var landing_parent : ScrollContainer = preload("table_landing.tscn").instantiate()
+	add_child(landing_parent)
+	add_child(header_parent)  #NOTE Make sure to always have the header after the landing, so it displays on top.
+	header_parent.owner = self
+	landing_parent.owner = self
+	_header = header_parent.get_node("Header_Box")
+	_landing = landing_parent.get_node("Landing_Box")
+	_columns = _landing.get_node("%Columns")
+	header_parent.get_h_scroll_bar().share(landing_parent.get_h_scroll_bar())
 	
 	await ready
 	_landing.draw.connect(_on_landing_draw)
@@ -140,9 +142,10 @@ func _init() -> void:
 #region Drawing Functions
 
 func _on_header_draw():
-	if _last_sort_title.is_empty():
+	# Draw Sorting Column Chevron
+	if sorting_column.is_empty():
 		return
-	var title_butt = get_col_idx(_last_sort_title)
+	var title_butt = get_col_idx(sorting_column)
 	title_butt = _header.get_child(title_butt)
 	
 	var centre = Vector2(
@@ -169,10 +172,11 @@ func _on_landing_draw():
 	
 	# Draw horizontal rules
 	for row in _rows_idx:
-		var rect := get_row_rect(row)
-		rect.position.y += spacer_y + 2
-		var start := Vector2(rect.position.x, rect.end.y)
-		_landing.draw_line(start, rect.end, base_color.lightened(0.4))
+		if not get_row_id(row) in _hidden_rows:
+			var rect := get_row_rect(row)
+			rect.position.y += spacer_y + 2
+			var start := Vector2(rect.position.x, rect.end.y)
+			_landing.draw_line(start, rect.end, base_color.lightened(0.4))
 	
 	# Highlight mouse hover cell
 	if hover_cell.x >= 0 and hover_cell.y >= 0:
@@ -247,6 +251,7 @@ func _on_cell_mouse_enter(cell:Control, col:String):
 	_landing.queue_redraw()
 #endregion
 
+
 func _on_landing_gui_input(event: InputEvent) -> void:
 	if event is InputEventKey and event.is_released():
 		#FIXME keypresses aren't being received.
@@ -292,7 +297,7 @@ func _on_landing_gui_input(event: InputEvent) -> void:
 		if event.is_released():
 			if _pressed_cell != -Vector2i.ONE: # Make sure a cell was hovered when the mouse button was pressed.
 				if hover_cell == _pressed_cell: # It's a click!
-					cell_clicked.emit(event.button_index)
+					cell_clicked.emit(hover_cell, event.button_index)
 					
 					if event.button_index == MOUSE_BUTTON_LEFT:
 						if Input.is_key_pressed(KEY_CTRL) and not selected_rows.is_empty():
@@ -319,6 +324,114 @@ func _on_landing_gui_input(event: InputEvent) -> void:
 		_landing.queue_redraw()
 #endregion
 
+#region Other Actions
+## Remove a row of given idx from the table. You can't remove cells. To empty a cell use [code]set_dict_row_texts()[/code].
+func remove_row(row_idx:int):
+	for col in _columns.get_children():
+		col.get_child(row_idx).queue_free()
+	
+	var id = get_row_id(row_idx)
+	_rows_ids.erase(id)
+	_rows_idx.erase(row_idx)
+	_rows_meta.erase(id)
+
+#region Count Things
+func get_row_count() -> int:
+	return _rows_idx.size()
+
+## Return how many cells are empty at the given row.
+func get_empty_cell_count(row:int) -> int:
+	var ans : int = 0
+	for each in get_row_texts(row):
+		if each == empty_cell_placeholder:
+			ans += 1
+	return ans
+
+## Check how any rows are visible
+func get_shown_row_count() -> int:
+	# Remove any possible duplicates in hidden list
+	var new_hidden : Array[int]
+	for id in _hidden_rows:
+		if not id in new_hidden:
+			new_hidden.append(id)
+	_hidden_rows = new_hidden
+	
+	return get_row_count() - _hidden_rows.size()
+
+## Check how many rows are not visible.
+func get_hidden_row_count() -> int:
+	# Remove any possible duplicates in hidden list
+	var new_hidden : Array[int]
+	for id in _hidden_rows:
+		if not id in new_hidden:
+			new_hidden.append(id)
+	_hidden_rows = new_hidden
+	
+	return _hidden_rows.size()
+#endregion
+
+#region Visibility of Things
+## Hides the row with the given ID.
+func hide_row(row_idx:int):
+	row_visible(row_idx, false)
+
+## Shows the row with the given ID.
+func show_row(row_id:int):
+	row_visible(row_id, true)
+
+#TODO: deselect rows that are hidden
+## Sets visibility on a row with the given ID. Cells of hidden columns stay hidden.
+func row_visible(row_id: int, make_visible:bool):
+	var idx = get_row_index(row_id)
+	if make_visible:
+		_hidden_rows.erase(row_id)
+	else:
+		if not row_id in _hidden_rows:
+			_hidden_rows.append(row_id)
+	var col : int = -1
+	for cell in get_row_items(idx):
+		col += 1
+		var title = get_col_title(col)
+		if not is_column_visible(title):
+			cell.hide()
+		else:
+			cell.visible = make_visible
+	_landing.queue_redraw.call_deferred()
+
+## Check if a row is visible.
+func is_row_visible(row_idx:int) -> bool:
+	var id = get_row_id(row_idx)
+	return not (id in _hidden_rows)
+
+## Hides the column of the given title.
+func hide_column(title:String):
+	column_visible(title, false)
+
+## Shows the column of the given title.
+func show_column(title:String):
+	column_visible(title, true)
+
+## Sets visibility of the column of the given title. Cells of hidden rows stay hidden.
+func column_visible(title:String, make_visible:bool):
+	var col : int = get_col_idx(title)
+	_header.get_child(col).hide()
+	var idx : int = -1
+	for cell in get_column_cells_items(title):
+		idx += 1
+		var id = get_row_id(idx)
+		if id in _hidden_rows:
+			cell.hide()
+		else:
+			cell.visible = make_visible
+
+## Check if column of given title is hidden.
+func is_column_visible(title:String) -> bool:
+	var col = get_col_idx(title)
+	return _header.get_child(col).visible
+#endregion
+#endregion
+
+#region Set Things
 
 #region Add or Create Things
 func _make_cell(col:int, text:String = "") -> Control:
@@ -384,8 +497,8 @@ func add_row(data:Array[String], use_default_column_order:=false) -> int:
 			_make_cell(col, data[i])
 
 	#NOTE We've set a temporary idx just to create entries in dictionaries, but the sorting will set the true idx of this row.
-	if not _last_sort_title.is_empty():
-		_sort_by_column(_last_sort_title)
+	if not sorting_column.is_empty():
+		_sort_by_column(sorting_column)
 	return get_row_index(id)
 
 ## This adds a row given a dictionary where the keys are column titles and the values are the items pertaining those columns. Returns the index of the row.[br]
@@ -420,24 +533,10 @@ func add_dict_row(data:Dictionary[String, Variant]) -> int:
 				id = int(data[title])
 	
 	#NOTE We've set a temporary idx just to create entries in dictionaries, but the sorting will set the true idx of this row.
-	if not _last_sort_title.is_empty():
-		_sort_by_column(_last_sort_title)
+	if not sorting_column.is_empty():
+		_sort_by_column(sorting_column)
 	return get_row_index(id)
 #endregion
-
-#region Remove Things
-## Remove a row of given idx from the table.
-func remove_row(row_idx:int):
-	for col in _columns.get_children():
-		col.get_child(row_idx).queue_free()
-	
-	var id = get_row_id(row_idx)
-	_rows_ids.erase(id)
-	_rows_idx.erase(row_idx)
-	_rows_meta.erase(id)
-#endregion
-
-#region Set Things
 
 #region Set Text or Items
 func _set_cell_text(text:String, col:int, row:int):
@@ -447,7 +546,7 @@ func _set_cell_text(text:String, col:int, row:int):
 	cell.set_meta("_table_cell_text_", text)
 	cell.set("text", text)  # Sets the text if the object has that property.
 	var title = get_col_title(col)
-	if _last_sort_title == title and title != autofill_idx:
+	if sorting_column == title and title != autofill_idx:
 		#NOTE: sorting rows will update the autofill_idx column, calling this function, which would call for sorting, causing an infinite loop. That's why we reject sorting if it's an autofill_id column being changed.
 		_sort_by_column(title)
 
@@ -477,8 +576,8 @@ func set_row_texts(row_id:int, data:PackedStringArray, use_default_column_order 
 			set_cell_text(data[i], col, idx)
 
 	#NOTE We've set a temporary idx just to create entries in dictionaries, but the sorting will set the true idx of this row.
-	if not _last_sort_title.is_empty():
-		_sort_by_column(_last_sort_title)
+	if not sorting_column.is_empty():
+		_sort_by_column(sorting_column)
 	return get_row_index(row_id)
 
 ## Similar to [code]add_dict_row()[/code], but to modify an existing row. Returns row idx, in case a cell in a sorting column was change, so it is also moved.[br]
@@ -505,8 +604,8 @@ func set_dict_row_texts(row_id:int, data:Dictionary[String, Variant]) -> int:
 				set_cell_text(data[title], get_col_idx(title), idx)
 	
 	#NOTE We've set a temporary idx just to create entries in dictionaries, but the sorting will set the true idx of this row.
-	if not _last_sort_title.is_empty():
-		_sort_by_column(_last_sort_title)
+	if not sorting_column.is_empty():
+		_sort_by_column(sorting_column)
 	return get_row_index(row_id)
 #endregion
 
@@ -542,7 +641,7 @@ func _resize_columns():
 		var width = title.size.x
 		var size_opt = column_width.get(_title_col[col], WIDTH.EXPAND)
 		var colbox : BoxContainer = _columns.get_child(col)
-		var col_cells = get_column_cells_items(col)
+		var col_cells = get_column_cells_items(get_col_title(col))
 		
 		match size_opt:
 			WIDTH.SHRINK_TITLE:
@@ -664,16 +763,6 @@ func set_row_id(idx:int, id:int) -> bool:
 func get_selected_rows() -> PackedInt32Array:
 	return selected_rows as PackedInt32Array
 
-func get_row_count() -> int:
-	return _rows_idx.size()
-
-## Return how many cells are empty at the given row.
-func get_empty_cell_count(row:int) -> int:
-	var ans : int = 0
-	for each in get_row_texts(row):
-		if each == empty_cell_placeholder:
-			ans += 1
-	return ans
 
 #region Get Indexes
 ## Get the coordinate or index of a column of the given title. Returns -1 if it doesn't exist.
@@ -708,8 +797,9 @@ func get_row_texts(idx:int) -> Array[String]:
 	return items
 
 ## Get all the text of cells under a column.
-func get_column_cells_texts(col:int) -> Array[Control]:
-	var ans : Array[Control]
+func get_column_cells_texts(title : String) -> Array[String]:
+	var col = get_col_idx(title)
+	var ans : Array[String]
 	for row in _rows_idx:
 		ans.append(get_cell_text(col, row))
 	return ans
@@ -768,7 +858,8 @@ func get_row_items(idx:int) -> Array[Control]:
 	return items
 
 ## Get all the elements of cells under a column.
-func get_column_cells_items(col:int) -> Array[Control]:
+func get_column_cells_items(title:String) -> Array[Control]:
+	var col = get_col_idx(title)
 	var ans : Array[Control]
 	ans.append_array(_columns.get_child(col).get_children())
 	return ans
@@ -808,15 +899,15 @@ func _move_column(title:String, tgt_idx:int):
 	print(_title_col)
 
 var _sort_dir : bool ## false = Ascending, true = Descending
-var _last_sort_title : String  ## The last column that was used for sorting
+var sorting_column : String  ## The last column that was used for sorting
 
 
 ## Sort rows according to a title. It will seek a [code]sort_by_{column_title}(row_id)[/code] function to determine a value to be compared, but if doesn't exist, it uses [code]filecasecmp_to()[/code] on the value of the cell's "_table_cell_text_" metadata.
 func _sort_by_column(title:String):
-	if _last_sort_title == title:
+	if sorting_column == title:
 		_sort_dir = not _sort_dir
 	else:
-		_last_sort_title = title
+		sorting_column = title
 	
 	# Find the new order of the rows
 	var picks : Array = _rows_ids.keys().duplicate()
@@ -846,7 +937,7 @@ func _sort_by_column(title:String):
 	
 	_rows_idx = new_rows_idx
 	_rows_ids = new_rows_ids
-	rows_sorted.emit()
+	rows_sorted.emit(sorting_column)
 	_header.queue_redraw()
 
 
