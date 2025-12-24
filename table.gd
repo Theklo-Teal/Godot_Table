@@ -19,11 +19,10 @@ signal rows_sorted(title:String)
 signal row_dragged(from_id:int, to_id:int) ## Emitted along [code]cell_dragged[/code] if the cells are of different rows. It supplies the IDs of these rows, rather than cell idx coordinate.
 
 #FIXME Having autofill columns named to a title that doesn't exist throws errors with some functions.
-#FIXME Adding columns throws an error for trying to access cells under the new column that don't exist.
 #FIXME Functions that rely on the node structure, like `get_cell_item()`, won't be reliable if called in the same process frame as when calling functions that affect the node structure, like `add_row()`. 
 
+#TODO Option for Header at the bottom
 #TODO Implement Sticky Column
-#TODO Allow multiple selection of rows that aren't necessarily between a range.
 #TODO The `columns` setter probably needs refactoring. Make it preserve cell data if a column wasn't removed.
 #TODO Make sure sorting is stable between the last sorted action and the next.
 #TODO Allow different kinds of Control nodes to be cells, rather than just Label.
@@ -57,9 +56,6 @@ var _hidden_rows : Array[int]  ## Lists id of rows to be hidden.
 			n += 1
 			_header.get_child(0).free()
 		
-		var new_column_width : Dictionary[String, WIDTH]
-		var new_column_justify : Dictionary[String, JUST]
-		
 		n = -1
 		for title in val:
 			n += 1
@@ -74,6 +70,7 @@ var _hidden_rows : Array[int]  ## Lists id of rows to be hidden.
 			var title_butt = Button.new()
 			title_butt.text = title
 			title_butt.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+			title_butt.size_flags_vertical = Control.SIZE_EXPAND_FILL
 			title_butt.focus_mode = Control.FOCUS_NONE
 			title_butt.show_behind_parent = true
 			title_butt.custom_minimum_size.x = _sort_chevron_radius + _sort_chevron_margin
@@ -88,14 +85,8 @@ var _hidden_rows : Array[int]  ## Lists id of rows to be hidden.
 			_col_title[title] = n
 			_title_col[n] = title
 			
-		
-		column_width = new_column_width
-		column_justify = new_column_justify
+
 		columns = _col_title.keys()
-		
-		_resize_columns()
-		_justify_content()
-		#_queue_sort()
 
 #@export var sticky_column : String = "" ## Column title for a column that is always in view even when scrolling horizontally. Not implemented.
 @export var autofill_idx : String = "" ## Column title of the column used for numbering rows. Empty if none.
@@ -123,6 +114,7 @@ func _init() -> void:
 	_landing.draw.connect(_on_landing_draw)
 	_landing.gui_input.connect(_on_landing_gui_input)
 	_header.draw.connect(_on_header_draw)
+	_landing.mouse_exited.connect(_on_mouse_exited)
 	
 	var header_scroll : HScrollBar = _header.get_parent().get_h_scroll_bar()
 	var landing_scroll : HScrollBar = _landing.get_parent().get_h_scroll_bar()
@@ -132,11 +124,14 @@ func _init() -> void:
 		if col != autofill_idx:
 			_sort_by_column(col)
 			break
-	
-	_justify_content()
-	_resize_columns()
+
 	_header.queue_redraw.call_deferred()
 	_landing.queue_redraw.call_deferred()
+
+
+func _on_mouse_exited():
+	hover_cell = Vector2i.ONE * -1
+	_landing.queue_redraw()
 
 #region Drawing Functions
 
@@ -229,7 +224,14 @@ func _on_title_up():
 	if not _hover_title.is_empty():
 		if _hover_title == _title_pressed:
 			if not (_title_pressed == autofill_idx and not autofill_idx.is_empty()):  # Don't sort autofill_idx column, but allow sorting empty columns. Ie. Don't equate autofill_idx with an empty column name.
-				 # Clicked on a column title.
+				# Clicked on a column title.
+				
+				#Change sort direction if click on the same column header again.
+				if sorting_column == _title_pressed:
+					_sort_dir = not _sort_dir
+				else:
+					sorting_column = _title_pressed
+	
 				_sort_by_column(_title_pressed)
 				header_title_clicked.emit(_title_pressed)
 		else:
@@ -344,6 +346,10 @@ func remove_row(row_idx:int):
 	_rows_idx.erase(row_idx)
 	_rows_meta.erase(id)
 
+func clear():
+	for idx in _rows_idx:
+		remove_row(idx)
+
 #region Count Things
 func get_row_count() -> int:
 	return _rows_idx.size()
@@ -381,8 +387,8 @@ func get_hidden_row_count() -> int:
 
 #region Visibility of Things
 ## Hides the row with the given ID.
-func hide_row(row_idx:int):
-	row_visible(row_idx, false)
+func hide_row(row_id:int):
+	row_visible(row_id, false)
 
 ## Shows the row with the given ID.
 func show_row(row_id:int):
@@ -406,6 +412,11 @@ func row_visible(row_id: int, make_visible:bool):
 		else:
 			cell.visible = make_visible
 	_landing.queue_redraw.call_deferred()
+
+func show_all_rows():
+	for row in _rows_ids:
+		_hidden_rows.clear()
+		show_row(row)
 
 ## Check if a row is visible.
 func is_row_visible(row_idx:int) -> bool:
@@ -439,8 +450,6 @@ func is_column_visible(title:String) -> bool:
 	return _header.get_child(col).visible
 #endregion
 #endregion
-
-#region Set Things
 
 #region Add or Create Things
 func _make_cell(col:int, text:String = "") -> Control:
@@ -547,6 +556,8 @@ func add_dict_row(data:Dictionary[String, Variant]) -> int:
 	return get_row_index(id)
 #endregion
 
+#region Set Things
+
 #region Set Text or Items
 func _set_cell_text(text:String, col:int, row:int):
 	if col == -1: # Attempt at accesing columns that doesn't exist!
@@ -624,95 +635,85 @@ var _sort_chevron_radius = 6
 var _sort_chevron_margin = 3
 
 enum WIDTH{
-	SHRINK_TITLE, ## Shrink width to the size of the size of the title.
 	SHRINK_CONTENT, ## Shrink width to the size of the widest cell under a column.
-	SHRINK_MAX,  ## Shrink width to the whichever is wider, the title or cells.
-	SHRINK_MIN,  ## Shrink width to whichever is narrower, the title or cells.
 	EXPAND,  ## Don't shrink. Takes as much space as available.
 }
 
-var column_width : Dictionary[String, WIDTH] :
-	set(val):
-		column_width = val
-		_resize_columns()
+var column_width : Dictionary[String, int]
 
-func _resize_columns():
-	#FIXME: size.x will not be a reliable way to get text width.
+
+#FIXME When setting size flags of one thing, that will affect the size of other 
+# things, so we can't get the correct size before all columns are set somehow.
+func resize_columns(data : Dictionary[String, int]):
+			
+	# If the button is taller than the chevron, set it according the button's height.
+	#var max_hei : float = max(_sort_chevron_radius, title.size.y)
+	#_sort_chevron_radius = max_hei * 0.3
+	#_sort_chevron_margin = _sort_chevron_radius * 1.4
 	
+	if not is_inside_tree():
+		return
+	
+	
+	for title in data:
+		column_width[title] = data[title]
+	
+	_reset_column_size()
+	await get_tree().process_frame
+	_set_column_clip()
+	await get_tree().process_frame
+	_set_column_minimum_size()
+	queue_redraw()
+
+func _reset_column_size():
 	for col in _title_col:
-		
-		# If the button is taller than the chevron, set it according the button's height.
-		var title = _header.get_child(col)
-		var max_hei : float = max(_sort_chevron_radius, title.size.y)
-		_sort_chevron_radius = max_hei * 0.3
-		_sort_chevron_margin = _sort_chevron_radius * 1.4
-		
-		var width = title.size.x
-		var size_opt = column_width.get(_title_col[col], WIDTH.EXPAND)
+		var title : Button = _header.get_child(col)
 		var colbox : BoxContainer = _columns.get_child(col)
-		var col_cells = get_column_cells_items(get_col_title(col))
+		title.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
+		colbox.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
+		title.custom_minimum_size.x = 0
+		colbox.custom_minimum_size.x = 0
+		title.reset_size()
+		colbox.reset_size()
+
+
+func _set_column_clip():
+
+	for col in _title_col:
+		var title : Button = _header.get_child(col)
+		var colbox : BoxContainer = _columns.get_child(col)
+		var cells : Array[Control] = get_column_cells_items(get_col_title(col))
+		
+		var size_opt = column_width.get(_title_col[col], WIDTH.EXPAND)
 		
 		match size_opt:
-			WIDTH.SHRINK_TITLE:
-				title.clip_contents = false
-			WIDTH.SHRINK_CONTENT:
-				title.clip_contents = true
-			WIDTH.SHRINK_MAX:
-				title.clip_contents = false
-			WIDTH.SHRINK_MIN:
-				title.clip_contents = true
-			WIDTH.EXPAND:
-				title.clip_contents = false
-			_:
-				title.clip_contents = true
-			
-		if size_opt != WIDTH.EXPAND:
-			title.size_flags_horizontal = SIZE_SHRINK_BEGIN
-		
-		var title_size = title.size.x
-		
-		for cell : Control in col_cells:
-			match size_opt:
-				WIDTH.SHRINK_TITLE:
-					colbox.clip_contents = true
-					width = title_size
-				WIDTH.SHRINK_CONTENT:
-					colbox.clip_contents = false
-					var widest : float = 0
-					for each in col_cells:
-						max(widest, _get_cell_width(each))
-					width = widest
-				WIDTH.SHRINK_MAX:
-					colbox.clip_contents = false
-					var widest : float = 0
-					for each in col_cells:
-						max(widest, _get_cell_width(each))
-					width = max(title_size, widest)
-				WIDTH.SHRINK_MIN:
-					colbox.clip_contents = true
-					var widest : float = 0
-					for each in col_cells:
-						max(widest, _get_cell_width(each))
-					width = min(title_size, widest)
-				WIDTH.EXPAND:
-					colbox.clip_contents = false
-					colbox.size_flags_horizontal = SIZE_EXPAND_FILL
-					title.size_flags_horizontal = SIZE_EXPAND_FILL
-					var widest : float = 0
-					for each in col_cells:
-						max(widest, _get_cell_width(each))
-					width = max(title_size, widest)
-				var n:
-					title.clip_contents = true
-					colbox.clip_contents = true
-					width = n
-				
-			if size_opt != WIDTH.EXPAND:
-				colbox.size_flags_horizontal = SIZE_SHRINK_BEGIN
-			
-			title.custom_minimum_size.x =  width + _sort_chevron_radius + _sort_chevron_margin
-			colbox.custom_minimum_size.x = title.size.x
+			WIDTH.SHRINK_CONTENT:  #true, false
+				title.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+				for cell : Label in cells:
+					cell.set("text_overrun_behavior", TextServer.OVERRUN_NO_TRIMMING)
+			WIDTH.EXPAND:  #true, false
+				title.text_overrun_behavior = TextServer.OVERRUN_NO_TRIMMING
+				for cell : Label in cells:
+					cell.set("text_overrun_behavior", TextServer.OVERRUN_TRIM_ELLIPSIS)
+				colbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+			var _enforce:
+				title.custom_minimum_size.x = _enforce
+				colbox.custom_minimum_size.x = _enforce
 
+func _set_column_minimum_size():
+	for col in _title_col:
+		var title : Button = _header.get_child(col)
+		var colbox : BoxContainer = _columns.get_child(col)
+		
+		var size_opt = column_width.get(_title_col[col], WIDTH.EXPAND)
+		
+		match size_opt:
+			WIDTH.SHRINK_CONTENT:
+				title.custom_minimum_size.x = colbox.size.x
+			WIDTH.EXPAND:
+				title.custom_minimum_size.x = colbox.size.x
+			var _enforce:
+				pass
 
 enum JUST{
 	LEFT,
@@ -720,10 +721,7 @@ enum JUST{
 	RIGHT
 }
 
-var column_justify : Dictionary[String, JUST] :
-	set(val):
-		column_justify = val
-		_justify_content()
+var column_justify : Dictionary[String, JUST]
 
 func _justify_content():
 	for row in _rows_idx:
@@ -915,11 +913,7 @@ var sorting_column : String  ## The last column that was used for sorting
 
 ## Sort rows according to a title. It will seek a [code]sort_by_{column_title}(row_id)[/code] function to determine a value to be compared, but if doesn't exist, it uses [code]filecasecmp_to()[/code] on the value of the cell's "_table_cell_text_" metadata.
 func _sort_by_column(title:String):
-	if sorting_column == title:
-		_sort_dir = not _sort_dir
-	else:
-		sorting_column = title
-	
+
 	# Find the new order of the rows
 	var picks : Array = _rows_ids.keys().duplicate()
 	picks.sort_custom(_row_sorting.bind(title))
